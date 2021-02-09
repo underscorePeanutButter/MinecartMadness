@@ -7,232 +7,464 @@ __lua__
 main_menu = true
 
 function reset_game()
-		player_x = 20
-		player_y = 52
-		segment_offset = 0
-		speed = 2
-		jumping = false
-		game_over = false
-		vertical_speed = 0
-		track = {}
-		kremlins = {}
-		score = 0
-		track_buffer = 10
-		track_start_y = 60
-		track_min_y = 60
-		track_y_margin = 60
-		track_max_length = 40
-		previous_button_press = false
+    DEBUG_ORIGINS = false
+    DEBUG_SPAWNING = false
+
+    -- CONSTANTS
+    sprite_w = 8
+    sprite_h = 8
+    player_w = sprite_w * 2
+    player_h = sprite_h * 2
+    kremling_w = sprite_w * 2
+    kremling_h = sprite_h * 2
+    track_y_start = 68
+    track_y_min = 60
+    track_y_margin = 60
+    track_segment_max_length = 40
+    max_track_segments = 10
+
+    player_start_jump_y_speed = -7
+    player_collision_death_y_speed = -5
+    player_fall_death_y_speed = 1 
+    kremling_collision_death_y_speed = 3
+
+    -- STATE
+    player = {
+        x = 20,
+        y = track_y_start - player_h,
+        x_speed = 2,
+        y_speed = 0,
+        is_jumping = false,
+        is_dying = false,
+    }
+
+    kremlings = {}
+    track_segments = {}
+
+    current_track_segment_offset = 0
+
+    if high_score == nil then
+        high_score = 0
+    end
+
+    current_score = 0
+
+    game_over = false
+
+    previous_button_press = false
+
+    -- TRACK SEGMENT TYPES
+    t_track = 0
+    t_hole = 1
+
+    -- COLORS
+    color_6 = 6
+    color_7 = 7
+    color_10 = 10
+
+    if DEBUG_SPAWNING then
+        spawned_kremling = false
+        spawned_track =  false
+    end
 end
 
-function check_for_kremlin_collisions()
-		i=1
-		while i <= #kremlins do
-				if ((player_x+16>kremlins[i][1] and player_x+16<kremlins[i][1]+16) or (player_x>kremlins[i][1] and player_x<kremlins[i][1]+16)) and ((player_y+16>kremlins[i][2] and player_y+16<kremlins[i][2]+16) or (player_y>kremlins[i][2] and player_y<kremlins[i][2]+16)) then
-						player_y = 128
-						jumping = true
-				end
-				i+=1
-		end
+function save_high_score()
+    if current_score != null then
+        if current_score > high_score then
+            high_score = current_score
+        end
+    end
 end
 
-function spawn_kremlin()		
-		i=1
-		draw_offset = 0
-		while i <= #track do
-				draw_offset += track[i][5]
-				i += 1
-		end
-		add(kremlins,{track[#track][3]+draw_offset-segment_offset,track[#track][4]-16,1})
+function check_for_kremling_collisions()
+    player_left = player.x + player_w / 8
+    player_right = player.x + player_w * 7 / 8
+    player_top = player.y + player_h / 4 -- use a smaller box on top of cart
+    player_bottom = player.y + player_h * 7 / 8
+
+    for kremling in all(kremlings) do
+        if kremling.is_dying == false then
+            kremling_left = kremling.x + kremling_w / 8
+            kremling_right = kremling.x + kremling_w * 7 / 8
+            kremling_top = kremling.y + kremling_h / 4 -- use a smaller box on top of kremling
+            kremling_bottom = kremling.y + kremling_h * 7 / 8
+
+            if kremling_left < player_right and kremling_left > player_left then
+                if kremling_top > player_top and kremling_top < player_bottom then
+                    if player.is_jumping then
+                        player_jump()
+                    else
+                        player_die(player_collision_death_y_speed)
+                    end
+
+                    kremling_die(kremling)
+                    return
+                end
+
+                if kremling_bottom > player_top and kremling_bottom < player_bottom then
+                    player_die(player_collision_death_y_speed)
+                    kremling_die(kremling)
+                    return
+                end
+            end
+
+            if kremling_right < player_right and kremling_right > player_left then
+                if kremling_top > player_top and kremling_top < player_bottom then
+                    if player.is_jumping then
+                        player_jump()
+                    else
+                        player_die(player_collision_death_y_speed)
+                    end
+
+                    kremling_die(kremling)
+                    return
+                end
+
+                if kremling_bottom > player_top and kremling_bottom < player_bottom then
+                    player_die(player_collision_death_y_speed)
+                    kremling_die(kremling)
+                    return
+                end
+            end
+        end
+    end
 end
 
-function jump()
-		jumping = true
-		vertical_speed = -7
+function spawn_kremling()
+    -- DETERMINE WHERE TO SPAWN
+    draw_offset = -current_track_segment_offset
+    for track_segment in all(track_segments) do
+        draw_offset += track_segment.length
+    end
+
+    kremling = {
+        x = draw_offset,
+        y = track_segments[#track_segments].y2 - kremling_h,
+        x_speed = flr(rnd(4)) + 2,
+        y_speed = 0,
+        is_dying = false,
+    }
+
+    add(kremlings, kremling)
+
+    if DEBUG_SPAWNING then
+        spawned_kremling = true
+    end
 end
 
-function determine_kremlin_y_values()
-		i=1
-		while i <= #kremlins do
-				j=1
-				kremlin_offset = 0
-				kremlin_offset -= segment_offset
-				while j <= #track do
-						if kremlins[i][1] > kremlin_offset and kremlins[i][1] < kremlin_offset+track[j][5] then
-								relative_kremlin_x = kremlins[i][1] - kremlin_offset
-								kremlins[i][2] = (track[j][4] - track[j][2])/track[j][5]*relative_kremlin_x+track[j][2]-16
-								break
-						end
-						kremlin_offset = 0
-						for k=1,j do
-								kremlin_offset += track[k][5]
-						end
-						kremlin_offset -= segment_offset
-						j+=1
-				end
-				i+=1
-		end
+function spawn_track_segment(start_y)
+    segment_length = flr(rnd(track_segment_max_length * 2 / 3)) + track_segment_max_length / 3
+
+    track_segment = {
+        x1 = 0,
+        y1 = start_y,
+        x2 = segment_length,
+        y2 = flr(rnd(track_y_margin)) + track_y_min,
+        length = segment_length, -- same as x2, but reads better
+        type = t_track
+    }
+
+    add(track_segments, track_segment)
+
+    if DEBUG_SPAWNING then
+        spawned_track = true
+    end
 end
 
-function generate_track_segment(s)
-		start_y = s
-		end_y = flr(rnd(track_y_margin)) + track_min_y
-		length = flr(rnd(track_max_length/3*2))+track_max_length/3
-		add(track,{player_x,start_y,player_x+length,end_y,length})
-		if flr(rnd(10)) >= 8 and #track == track_buffer and #kremlins < 1 then
-				spawn_kremlin()
-		end
+function spawn_hole_segment(start_y)
+    segment_length = flr(rnd(10)) + player_w
+
+    -- TODO: allow spawning a y2 that is lower, but not higher
+    track_segment = {
+        x1 = 0,
+        y1 = start_y,
+        x2 = segment_length,
+        y2 = start_y,
+        length = segment_length, -- same as x2, but reads better
+        type = t_hole
+    }
+
+    add(track_segments, track_segment)
+
+    if DEBUG_SPAWNING then
+        spawned_track = true
+    end
 end
 
-function generate_hole(s)
-		start_y = s
-		end_y = s
-		length = flr(rnd(10)) + 10
-		add(track,{player_x,start_y,player_x+length,end_y,length,0})
+function player_jump()
+    player.is_jumping = true
+    player.y_speed = player_start_jump_y_speed
+end
+
+function kremling_die(kremling)
+    kremling.is_dying = true
+    kremling.x_speed = 0
+    kremling.y_speed = kremling_collision_death_y_speed
+end
+
+function player_die(y_speed)
+    player.is_dying = true
+    player.x_speed = 0
+    player.y_speed = y_speed
+end
+
+function get_track_info(x)
+    draw_offset = -current_track_segment_offset
+
+    for i=1, #track_segments, 1 do
+        -- FIND THE CURRENT SEGMENT AT THE X LOCATION
+        if x > draw_offset and x <= draw_offset + track_segments[i].length then
+            return {
+                segment_index = i,
+                segment_x = x - draw_offset
+            }
+        end
+
+        draw_offset += track_segments[i].length
+    end
+
+    -- ERROR / SHOULD NOT HAPPEN
+    return { 
+        segment_index = #track_segments,
+        segment_x = track_segments[#track_segments].length
+    }
+end
+
+function calculate_track_y(x)
+    track_info = get_track_info(x)
+
+    -- DETERMINE Y LOCATION ON CURRENT SEGMENT USING SLOPE
+    y = (track_segments[track_info.segment_index].y2 - track_segments[track_info.segment_index].y1) / track_segments[track_info.segment_index].length * track_info.segment_x + track_segments[track_info.segment_index].y1
+    return y
 end
 
 function _draw()
-		if main_menu then
-				rectfill(0,0,127,127,0)
-				draw_x_start = 20
-				draw_x = draw_x_start
-				draw_y_start = 10
-				draw_y = draw_y_start
-				for i=64,74 do
-						spr(i,draw_x,draw_y)
-						draw_x+=8
-				end
-				draw_x = draw_x_start
-				draw_y+=8
-				for i=80,90 do
-						spr(i,draw_x,draw_y)
-						draw_x+=8
-				end
-				draw_x = draw_x_start
-				draw_y+=8
-				for i=96,106 do
-						spr(i,draw_x,draw_y)
-						draw_x+=8
-				end
-				draw_x = 22
-				draw_y+=8
-				for i=112,122 do
-						spr(i,draw_x,draw_y)
-						draw_x+=8
-				end
-				
-				print("press c to start",32,60,7)
-				print("controls",47,70,6)
-				print("c - jump",47,77,7)
-		else
-				if player_y < 128 and #track > 0 then
-					 rectfill(0,0,127,127,0)
-						i=1
-						while i <= #kremlins do
-								kremlins[i][1] -= (kremlins[i][3]+speed)
-								i+=1
-						end
-					 if jumping == false then
-					 		player_y = (track[1][4]-track[1][2])/track[1][5]*segment_offset+track[1][2]-16
-				  else
-				  		player_y += vertical_speed
-				  		vertical_speed += 1		  		
-				  		if player_y+8 >= (track[1][4]-track[1][2])/track[1][5]*segment_offset+track[1][2]-16 and player_y+8 <= (track[1][4]-track[1][2])/track[1][5]*segment_offset+track[1][2]+8 and #track[1] != 6 then
-				  				jumping = false
-				  		end
-				  end
-				  spr(1,player_x-4,player_y)
-				  spr(2,player_x+4,player_y)
-				  spr(17,player_x-4,player_y+8)
-				  spr(18,player_x+4,player_y+8)
-				  i=1
-				  draw_offset = 0
-				  while i <= #track do
-				    if #track[i] == 5 then
-				    		line(track[i][1]-segment_offset+draw_offset,track[i][2],track[i][3]-segment_offset+draw_offset,track[i][4],7)
-				    end
-				    draw_offset += track[i][5]
-				    i+=1
-				  end
-				  i=1
-						while i <= #kremlins do
-								spr(4,kremlins[i][1],kremlins[i][2])
-								spr(5,kremlins[i][1]+8,kremlins[i][2])
-								spr(20,kremlins[i][1],kremlins[i][2]+8)
-								spr(21,kremlins[i][1]+8,kremlins[i][2]+8)
-								i+=1
-						end
-				else
-						print("game over",47,50,7)
-				end
-				print("distance "..score,10,10,7)				
-		end
+    if main_menu then
+        rectfill(0, 0, 127, 127, 0)
+        draw_x_start = 20
+        draw_x = draw_x_start
+        draw_y_start = 10
+        draw_y = draw_y_start
+        for i=64, 74 do
+            spr(i, draw_x, draw_y)
+            draw_x += 8
+        end
+        draw_x = draw_x_start
+        draw_y += 8
+        for i=80, 90 do
+            spr(i, draw_x, draw_y)
+            draw_x += 8
+        end
+        draw_x = draw_x_start
+        draw_y += 8
+        for i=96, 106 do
+            spr(i, draw_x, draw_y)
+            draw_x += 8
+        end
+        draw_x = 22
+        draw_y += 8
+        for i=112, 122 do
+            spr(i, draw_x, draw_y)
+            draw_x += 8
+        end
+
+        print("press c to start", 32, 60, 7)
+        print("controls", 47, 70, 6)
+        print("c - jump", 47, 77, 7)
+    else
+        if player.y < 128 and #track_segments > 0 then
+
+            -- CLEAR BACKGROUND
+            rectfill(0, 0, 127, 127, 0)
+
+            if DEBUG_SPAWNING then
+                if spawned_track then
+                    line(10, 40, 10, 50, color_10)
+                    line(11, 40, 11, 50, color_10)
+                    line(12, 40, 12, 50, color_10)
+                end
+
+                if spawned_kremling then
+                    line(128 - 10, 40, 128 - 10, 50, color_10)
+                    line(128 - 11, 40, 128 - 11, 50, color_10)
+                    line(128 - 12, 40, 128 - 12, 50, color_10)
+                end
+            end
+
+            -- DRAW PLAYER
+            spr(1, player.x - 8, player.y)
+            spr(2, player.x, player.y)
+            spr(17, player.x - 8, player.y + 8)
+            spr(18, player.x, player.y + 8)
+
+            if DEBUG_ORIGINS then
+                line(player.x - 1, player.y, player.x + 1, player.y, color_10)
+                line(player.x, player.y - 1, player.x, player.y + 1, color_10)
+            end
+
+            -- DRAW ALL TRACK SEGMENTS
+            draw_offset = -current_track_segment_offset 
+            for track_segment in all(track_segments) do
+                if track_segment.type == t_track then
+                    line(track_segment.x1 + draw_offset, track_segment.y1, track_segment.x2 + draw_offset, track_segment.y2, color_7)
+                end
+
+                if DEBUG_ORIGINS then
+                    line(track_segment.x1 + draw_offset - 1, track_segment.y1, track_segment.x1 + draw_offset + 1, track_segment.y1, color_10)
+                    line(track_segment.x1 + draw_offset, track_segment.y1 - 1, track_segment.x1 + draw_offset, track_segment.y1 + 1, color_10)
+                end
+
+                draw_offset += track_segment.length
+            end
+
+            -- DRAW ALL KREMLINGS
+            for kremling in all(kremlings) do
+                spr(4, kremling.x - 8, kremling.y)
+                spr(5, kremling.x, kremling.y)
+                spr(20, kremling.x - 8, kremling.y + 8)
+                spr(21, kremling.x, kremling.y + 8)
+
+                if DEBUG_ORIGINS then
+                    line(kremling.x - 1, kremling.y, kremling.x + 1, kremling.y, color_10)
+                    line(kremling.x, kremling.y - 1, kremling.x, kremling.y + 1, color_10)
+                end
+            end
+        else
+            print("game over", 47, 50, 7)
+        end
+
+        print("distance "..current_score, 10, 10, 7)
+
+        high_score_display = "best "..high_score
+        print(high_score_display, 118 - #high_score_display * 4, 10, 7)
+    end
 end
 
 function _update()
-		if main_menu then
-				if btn(4) then
-						if not previous_button_press then
-								reset_game()
-								main_menu = false
-						end
-				else
-						previous_button_press = false
-				end
-		else
-				if player_y < 128 then
-						check_for_kremlin_collisions()
-						if btn(4) then
-								previous_button_press = true
-								if jumping == false then
-				  				jump()
-				  		end
-				  else
-				  		previous_button_press = false
-				  end
-						if #track == 0 then
-						  i=0
-						  last_end_y = track_start_y
-						  while i < track_buffer do
-								  generate_track_segment(last_end_y)
-								  last_end_y = track[#track][4]
-										i+=1
-						  end
-						end
-						if segment_offset >= track[1][5] then
-								del(track, track[1])
-								if flr(rnd(10)) >= 6 and #track[#track] != 6 then
-										generate_hole(track[#track][4])
-								else
-										generate_track_segment(track[#track][4])
-								end
-								segment_offset = 0
-						end
-						if #track[1] == 6 and jumping == false then
-								jumping = true
-								vertical_speed = 1
-						end
-				  segment_offset += speed
-				  score += speed
-				  determine_kremlin_y_values()
-						i=1
-						while i <= #kremlins do
-								if kremlins[i][1] < 0 then
-										del(kremlins,kremlins[i])
-								end
-								i+=1
-						end
-				else
-						if btn(4) then
-								if not previous_button_press then
-										main_menu = true
-								end
-								previous_button_press = true
-						else
-								previous_button_press = false
-						end
-				end
-		end
+    if main_menu then
+        if btn(4) then
+            if not previous_button_press then
+                save_high_score()
+                reset_game()
+                main_menu = false
+            end
+        else
+            previous_button_press = false
+        end
+    else
+        -- ONLY IF PLAYER IS ALIVE
+        if player.y < 128 then
+            current_track_segment_offset += player.x_speed
+            current_score += player.x_speed
+
+            if DEBUG_SPAWNING then
+                spawned_kremling = false
+                spawned_track = false
+            end
+
+            check_for_kremling_collisions()
+
+            -- HANDLE BUTTON PRESS
+            if btn(4) then
+                previous_button_press = true
+                if player.is_dying == false and player.is_jumping == false then
+                    player_jump()
+                end
+            else
+                previous_button_press = false
+            end
+
+            -- GENERATE TRACK
+            while #track_segments < max_track_segments do
+                -- ALWAYS GENERATE THREE TRACK TYPES FIRST
+                if #track_segments == 0 then
+                    spawn_track_segment(track_y_start)
+                    spawn_track_segment(track_segments[#track_segments].y2)
+                    spawn_track_segment(track_segments[#track_segments].y2)
+                else
+                    should_spawn_hole = flr(rnd(10)) >= 6 
+                    if should_spawn_hole and track_segments[#track_segments].type == t_track then
+                        spawn_hole_segment(track_segments[#track_segments].y2)
+                    else
+                        spawn_track_segment(track_segments[#track_segments].y2)
+                    end
+                end
+            end
+
+            -- REMOVE OFF-SCREEN TRACK SEGMENTS
+            if current_track_segment_offset >= track_segments[1].length then
+                del(track_segments, track_segments[1])
+                current_track_segment_offset = 0
+            end
+
+            -- MOVE PLAYER
+            left_track_info = get_track_info(player.x - player_w / 4) -- check under the left wheel
+            right_track_info = get_track_info(player.x + player_w * 3 / 4) -- check under the right wheel
+            if player.is_jumping or player.is_dying then
+                -- HANDLE GRAVITY
+                player.y += player.y_speed
+                player.y_speed += 1
+            
+                -- DISABLE GRAVITY IF PLAYER LANDED
+                if player.is_jumping then
+                    track_y = calculate_track_y(player.x)
+                    if player.y >= track_y - player_h then
+                        player.is_jumping = false
+
+                         -- PLAYER IS BELOW THE TRACK AND STILL FALLING
+                        if track_segments[left_track_info.segment_index].type == t_hole and track_segments[right_track_info.segment_index].type == t_hole then
+                            if player.y_speed > 0 then 
+                                player_die(player.y_speed)
+                            end
+                        end
+                    end
+                end
+            else
+                -- PLAYER DROVE INTO A HOLE
+                if track_segments[left_track_info.segment_index].type == t_hole and track_segments[right_track_info.segment_index].type == t_hole then
+                    player_die(player_fall_death_y_speed)
+                else
+                    player.y = calculate_track_y(player.x) - player_h
+                end
+            end
+
+            -- MOVE KREMLINGS
+            for kremling in all(kremlings) do
+                -- MUST ACCOUNT FOR THE PLAYER SPEED
+                kremling.x -= (kremling.x_speed + player.x_speed)
+
+                if kremling.is_dying then
+                    -- HANDLE GRAVITY
+                    kremling.y += kremling.y_speed
+                    kremling.y_speed += 1
+                else
+                    kremling.y = calculate_track_y(kremling.x) - kremling_h
+                end
+            end
+
+            -- REMOVE OFF-SCREEN KREMLINGS
+            for kremling in all(kremlings) do
+                if kremling.x < 0 then
+                    del(kremlings, kremling)
+                end
+            end
+
+            -- SPAWN KREMLING
+            if flr(rnd(10000)) > 9900 and #kremlings < 1 then
+                spawn_kremling()
+            end
+
+        else
+            if btn(4) then
+                if not previous_button_press then
+                    main_menu = true
+                end
+                previous_button_press = true
+            else
+                previous_button_press = false
+            end
+        end
+    end
 end
 __gfx__
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -430,3 +662,4 @@ __label__
 
 __sfx__
 000100070a0000a0000a0000a0000a0000a0000a00008000090001c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+
