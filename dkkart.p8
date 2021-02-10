@@ -22,6 +22,7 @@ function reset_game()
     track_y_margin = 60
     track_segment_max_length = 40
     max_track_segments = 10
+    max_jump_count = 2
 
     player_start_jump_y_speed = -7
     player_collision_death_y_speed = -5
@@ -35,6 +36,7 @@ function reset_game()
         x_speed = 2,
         y_speed = 0,
         is_jumping = false,
+        jump_count = 0,
         is_dying = false,
     }
 
@@ -51,7 +53,7 @@ function reset_game()
 
     game_over = false
 
-    previous_button_press = false
+    screen_shake_offset = 0
 
     -- TRACK SEGMENT TYPES
     t_track = 0
@@ -83,7 +85,7 @@ function check_for_kremling_collisions()
     player_bottom = player.y + player_h * 7 / 8
 
     for kremling in all(kremlings) do
-        if kremling.is_dying == false then
+        if not kremling.is_dying then
             kremling_left = kremling.x + kremling_w / 8
             kremling_right = kremling.x + kremling_w * 7 / 8
             kremling_top = kremling.y + kremling_h / 4 -- use a smaller box on top of kremling
@@ -92,9 +94,9 @@ function check_for_kremling_collisions()
             if kremling_left < player_right and kremling_left > player_left then
                 if kremling_top > player_top and kremling_top < player_bottom then
                     if player.is_jumping then
-                        player_jump()
+                        player_start_jump()
                     else
-                        player_die(player_collision_death_y_speed)
+                        player_collision_death()
                     end
 
                     kremling_die(kremling)
@@ -102,7 +104,7 @@ function check_for_kremling_collisions()
                 end
 
                 if kremling_bottom > player_top and kremling_bottom < player_bottom then
-                    player_die(player_collision_death_y_speed)
+                    player_collision_death()
                     kremling_die(kremling)
                     return
                 end
@@ -111,9 +113,9 @@ function check_for_kremling_collisions()
             if kremling_right < player_right and kremling_right > player_left then
                 if kremling_top > player_top and kremling_top < player_bottom then
                     if player.is_jumping then
-                        player_jump()
+                        player_start_jump()
                     else
-                        player_die(player_collision_death_y_speed)
+                        player_collision_death()
                     end
 
                     kremling_die(kremling)
@@ -121,7 +123,7 @@ function check_for_kremling_collisions()
                 end
 
                 if kremling_bottom > player_top and kremling_bottom < player_bottom then
-                    player_die(player_collision_death_y_speed)
+                    player_collision_death()
                     kremling_die(kremling)
                     return
                 end
@@ -191,15 +193,36 @@ function spawn_hole_segment(start_y)
     end
 end
 
-function player_jump()
+function player_start_jump()
     player.is_jumping = true
+    player.jump_count += 1
     player.y_speed = player_start_jump_y_speed
+end
+
+function player_stop_jump()
+    player.is_jumping = false
+    player.jump_count = 0
 end
 
 function kremling_die(kremling)
     kremling.is_dying = true
     kremling.x_speed = 0
     kremling.y_speed = kremling_collision_death_y_speed
+end
+
+function player_collision_death()
+    screen_shake_offset = 0.2
+    player_die(player_collision_death_y_speed)
+end
+
+function player_fall_death()
+    y_speed = player_fall_death_y_speed
+
+    if (player.y_speed > y_speed) then
+        y_speed = player.y_speed
+    end
+
+    player_die(y_speed)
 end
 
 function player_die(y_speed)
@@ -238,6 +261,21 @@ function calculate_track_y(x)
     return y
 end
 
+-- http://gamedev.docrobs.co.uk/screen-shake-in-pico-8
+function apply_screen_shake()
+    local fade = 0.95
+    local camera_offset_x = 16 - rnd(32)
+    local camera_offset_y = 16 - rnd(32)
+    camera_offset_x *= screen_shake_offset
+    camera_offset_y *= screen_shake_offset
+
+    camera(camera_offset_x, camera_offset_y)
+    screen_shake_offset*=fade
+    if screen_shake_offset < 0.05 then
+        screen_shake_offset = 0
+    end
+end
+
 function _draw()
     if main_menu then
         rectfill(0, 0, 127, 127, 0)
@@ -273,9 +311,10 @@ function _draw()
         print("c - jump", 47, 77, 7)
     else
         if player.y < 128 and #track_segments > 0 then
-
             -- CLEAR BACKGROUND
             rectfill(0, 0, 127, 127, 0)
+
+            apply_screen_shake()
 
             if DEBUG_SPAWNING then
                 if spawned_track then
@@ -337,19 +376,17 @@ function _draw()
 
         high_score_display = "best "..high_score
         print(high_score_display, 118 - #high_score_display * 4, 10, 7)
+
+        print(""..player.jump_count, 64, 10, 7)
     end
 end
 
 function _update()
     if main_menu then
-        if btn(4) then
-            if not previous_button_press then
-                save_high_score()
-                reset_game()
-                main_menu = false
-            end
-        else
-            previous_button_press = false
+        if btnp(4) then
+            save_high_score()
+            reset_game()
+            main_menu = false
         end
     else
         -- ONLY IF PLAYER IS ALIVE
@@ -365,24 +402,21 @@ function _update()
             check_for_kremling_collisions()
 
             -- HANDLE BUTTON PRESS
-            if btn(4) then
-                previous_button_press = true
-                if player.is_dying == false and player.is_jumping == false then
-                    player_jump()
+            if btnp(4) then
+                if not player.is_dying and player.jump_count < max_jump_count then
+                    player_start_jump()
                 end
-            else
-                previous_button_press = false
             end
 
             -- GENERATE TRACK
             while #track_segments < max_track_segments do
-                -- ALWAYS GENERATE THREE TRACK TYPES FIRST
+                -- GENERATE A FEW TRACK TYPES FIRST
                 if #track_segments == 0 then
                     spawn_track_segment(track_y_start)
                     spawn_track_segment(track_segments[#track_segments].y2)
                     spawn_track_segment(track_segments[#track_segments].y2)
                 else
-                    should_spawn_hole = flr(rnd(10)) >= 6 
+                    should_spawn_hole = flr(rnd(10)) >= 8 
                     if should_spawn_hole and track_segments[#track_segments].type == t_track then
                         spawn_hole_segment(track_segments[#track_segments].y2)
                     else
@@ -399,7 +433,7 @@ function _update()
 
             -- MOVE PLAYER
             left_track_info = get_track_info(player.x - player_w / 4) -- check under the left wheel
-            right_track_info = get_track_info(player.x + player_w * 3 / 4) -- check under the right wheel
+            right_track_info = get_track_info(player.x + player_w / 4) -- check under the right wheel
             if player.is_jumping or player.is_dying then
                 -- HANDLE GRAVITY
                 player.y += player.y_speed
@@ -409,20 +443,20 @@ function _update()
                 if player.is_jumping then
                     track_y = calculate_track_y(player.x)
                     if player.y >= track_y - player_h then
-                        player.is_jumping = false
+                        player_stop_jump()
 
                          -- PLAYER IS BELOW THE TRACK AND STILL FALLING
                         if track_segments[left_track_info.segment_index].type == t_hole and track_segments[right_track_info.segment_index].type == t_hole then
                             if player.y_speed > 0 then 
-                                player_die(player.y_speed)
+                                player_fall_death()
                             end
                         end
                     end
                 end
             else
-                -- PLAYER DROVE INTO A HOLE
+                -- BOTH WHEELS ARE OVER A HOLE
                 if track_segments[left_track_info.segment_index].type == t_hole and track_segments[right_track_info.segment_index].type == t_hole then
-                    player_die(player_fall_death_y_speed)
+                    player_fall_death()
                 else
                     player.y = calculate_track_y(player.x) - player_h
                 end
@@ -455,13 +489,8 @@ function _update()
             end
 
         else
-            if btn(4) then
-                if not previous_button_press then
-                    main_menu = true
-                end
-                previous_button_press = true
-            else
-                previous_button_press = false
+            if btnp(4) then
+                main_menu = true
             end
         end
     end
