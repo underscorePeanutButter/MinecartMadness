@@ -2,22 +2,36 @@ pico-8 cartridge // http://www.pico-8.com
 version 29
 __lua__
 --minecart madness
---by _peanutbutter
+--by _peanutbutter, hiptopjones
 
 main_menu = true
+
+-- TODO: move all object origins to the track
 
 function reset_game()
     DEBUG_ORIGINS = false
     DEBUG_SPAWNING = false
 
-    -- CONSTANTS
+    -- sprite extents
     sprite_w = 8
     sprite_h = 8
     player_w = sprite_w * 2
     player_h = sprite_h * 2
     kremling_w = sprite_w * 2
     kremling_h = sprite_h * 2
+    obstacle_w = sprite_w * 2
+    obstacle_h = sprite_h
 
+    -- track segment types
+    t_track = 0
+    t_hole = 1
+
+    -- colors
+    color_6 = 6
+    color_7 = 7
+    color_10 = 10
+
+    -- constants
     player_x_start = 20
     player_x_speed_start = 2
     track_y_start = 68
@@ -28,13 +42,13 @@ function reset_game()
     track_segment_max_length = 40
     max_track_segments = 10
     max_jump_count = 2
-
     player_start_jump_y_speed = -7
     player_collision_death_y_speed = -5
     player_fall_death_y_speed = 1 
     kremling_collision_death_y_speed = 3
+    obstacle_collision_death_y_speed = 3
 
-    -- STATE
+    -- state
     player = {
         x = player_x_start,
         y = track_y_start - player_h,
@@ -46,6 +60,7 @@ function reset_game()
     }
 
     kremlings = {}
+    obstacles = {}
     track_segments = {}
 
     current_track_segment_offset = 0
@@ -55,22 +70,12 @@ function reset_game()
     end
 
     current_score = 0
-
     game_over = false
-
     screen_shake_offset = 0
-
-    -- TRACK SEGMENT TYPES
-    t_track = 0
-    t_hole = 1
-
-    -- COLORS
-    color_6 = 6
-    color_7 = 7
-    color_10 = 10
 
     if DEBUG_SPAWNING then
         spawned_kremling = false
+        spawned_obstacle = false
         spawned_track =  false
     end
 end
@@ -104,13 +109,13 @@ function check_for_kremling_collisions()
                         player_collision_death()
                     end
 
-                    kremling_die(kremling)
+                    kremling_death(kremling)
                     return
                 end
 
                 if kremling_bottom > player_top and kremling_bottom < player_bottom then
                     player_collision_death()
-                    kremling_die(kremling)
+                    kremling_death(kremling)
                     return
                 end
             end
@@ -123,13 +128,13 @@ function check_for_kremling_collisions()
                         player_collision_death()
                     end
 
-                    kremling_die(kremling)
+                    kremling_death(kremling)
                     return
                 end
 
                 if kremling_bottom > player_top and kremling_bottom < player_bottom then
                     player_collision_death()
-                    kremling_die(kremling)
+                    kremling_death(kremling)
                     return
                 end
             end
@@ -137,25 +142,45 @@ function check_for_kremling_collisions()
     end
 end
 
-function spawn_kremling()
-    -- DETERMINE WHERE TO SPAWN
-    draw_offset = -current_track_segment_offset
-    for track_segment in all(track_segments) do
-        draw_offset += track_segment.length
-    end
+function check_for_obstacle_collisions()
+    player_left = player.x + player_w / 8
+    player_right = player.x + player_w * 7 / 8
+    player_top = player.y + player_h / 4 -- use a smaller box on top of cart
+    player_bottom = player.y + player_h * 7 / 8
 
-    kremling = {
-        x = draw_offset,
-        y = track_segments[#track_segments].y2 - kremling_h,
-        x_speed = flr(rnd(4)) + 2,
-        y_speed = 0,
-        is_dying = false,
-    }
+    for obstacle in all(obstacles) do
+        obstacle_left = obstacle.x
+        obstacle_right = obstacle.x + obstacle_w
+        obstacle_top = obstacle.y
+        obstacle_bottom = obstacle.y + obstacle_h
 
-    add(kremlings, kremling)
+        if obstacle_left < player_right and obstacle_left > player_left then
+            if obstacle_top > player_top and obstacle_top < player_bottom then
+                player_collision_death()
+                obstacle_death(obstacle)
+                return
+            end
 
-    if DEBUG_SPAWNING then
-        spawned_kremling = true
+            if obstacle_bottom > player_top and obstacle_bottom < player_bottom then
+                player_collision_death()
+                obstacle_death(obstacle)
+                return
+            end
+        end
+
+        if obstacle_right < player_right and obstacle_right > player_left then
+            if obstacle_top > player_top and obstacle_top < player_bottom then
+                player_collision_death()
+                obstacle_death(obstacle)
+                return
+            end
+
+            if obstacle_bottom > player_top and obstacle_bottom < player_bottom then
+                player_collision_death()
+                obstacle_death(obstacle)
+                return
+            end
+        end
     end
 end
 
@@ -170,6 +195,8 @@ function spawn_track_segment(start_y)
         length = segment_length, -- same as x2, but reads better
         type = t_track
     }
+
+    track_segment.slope = (track_segment.y2 - track_segment.y1) / (track_segment.x2 - track_segment.x1)
 
     add(track_segments, track_segment)
 
@@ -192,10 +219,59 @@ function spawn_hole_segment(start_y)
         type = t_hole
     }
 
+    track_segment.slope = (track_segment.y2 - track_segment.y1) / (track_segment.x2 - track_segment.x1)
+
     add(track_segments, track_segment)
 
     if DEBUG_SPAWNING then
         spawned_track = true
+    end
+end
+
+function spawn_kremling()
+    -- determine where to spawn
+    draw_offset = -current_track_segment_offset
+    for track_segment in all(track_segments) do
+        draw_offset += track_segment.length
+    end
+
+    kremling = {
+        x = draw_offset,
+        y = track_segments[#track_segments].y2 - kremling_h,
+        x_speed = flr(rnd(4)) + 2,
+        y_speed = 0,
+        is_dying = false,
+    }
+
+    add(kremlings, kremling)
+
+    if DEBUG_SPAWNING then
+        spawned_kremling = true
+    end
+end
+
+function spawn_obstacle()
+    -- determine where to spawn
+    draw_offset = -current_track_segment_offset
+    for track_segment in all(track_segments) do
+        draw_offset += track_segment.length
+    end
+
+    -- place the obstacle in the middle of the segment
+    segment_x_mid = draw_offset - track_segments[#track_segments].length / 2
+
+    obstacle = {
+        x = flr(segment_x_mid),
+        y = calculate_track_y(segment_x_mid) - obstacle_h,
+        x_speed = 0, -- will use current player.x_speed
+        y_speed = 0,
+        is_dying = false
+    }
+
+    add(obstacles, obstacle)
+
+    if DEBUG_SPAWNING then
+        spawned_obstacle = true
     end
 end
 
@@ -210,10 +286,16 @@ function player_stop_jump()
     player.jump_count = 0
 end
 
-function kremling_die(kremling)
+function kremling_death(kremling)
     kremling.is_dying = true
     kremling.x_speed = 0
     kremling.y_speed = kremling_collision_death_y_speed
+end
+
+function obstacle_death(obstacle)
+    obstacle.is_dying = true
+    obstacle.x_speed = 0
+    obstacle.y_speed = obstacle_collision_death_y_speed
 end
 
 function player_collision_death()
@@ -241,7 +323,7 @@ function get_track_info(x)
     draw_offset = -current_track_segment_offset
 
     for i=1, #track_segments, 1 do
-        -- FIND THE CURRENT SEGMENT AT THE X LOCATION
+        -- find the track segment under the provided x location
         if x > draw_offset and x <= draw_offset + track_segments[i].length then
             return {
                 segment_index = i,
@@ -252,7 +334,7 @@ function get_track_info(x)
         draw_offset += track_segments[i].length
     end
 
-    -- ERROR / SHOULD NOT HAPPEN
+    -- error / should not happen
     return { 
         segment_index = #track_segments,
         segment_x = track_segments[#track_segments].length
@@ -262,8 +344,8 @@ end
 function calculate_track_y(x)
     track_info = get_track_info(x)
 
-    -- DETERMINE Y LOCATION ON CURRENT SEGMENT USING SLOPE
-    y = (track_segments[track_info.segment_index].y2 - track_segments[track_info.segment_index].y1) / track_segments[track_info.segment_index].length * track_info.segment_x + track_segments[track_info.segment_index].y1
+    -- determine y location on current segment based on x
+    y = track_segments[track_info.segment_index].slope * track_info.segment_x + track_segments[track_info.segment_index].y1
     return y
 end
 
@@ -317,7 +399,6 @@ function _draw()
         print("c - jump", 47, 77, 7)
     else
         if player.y < 128 and #track_segments > 0 then
-            -- CLEAR BACKGROUND
             rectfill(0, 0, 127, 127, 0)
 
             apply_screen_shake()
@@ -330,24 +411,38 @@ function _draw()
                 end
 
                 if spawned_kremling then
+                    line(64 - 10, 40, 64 - 10, 50, color_10)
+                    line(64 - 11, 40, 64 - 11, 50, color_10)
+                    line(64 - 12, 40, 64 - 12, 50, color_10)
+                end
+
+                if spawned_obstacle then
                     line(128 - 10, 40, 128 - 10, 50, color_10)
                     line(128 - 11, 40, 128 - 11, 50, color_10)
                     line(128 - 12, 40, 128 - 12, 50, color_10)
                 end
             end
 
-            -- DRAW PLAYER
-            spr(1, player.x - 8, player.y)
-            spr(2, player.x, player.y)
-            spr(17, player.x - 8, player.y + 8)
-            spr(18, player.x, player.y + 8)
+            -- draw player
+            if player.is_dying then
+                -- draw upside down
+                spr(17, player.x - 8, player.y, 1, 1, false, true)
+                spr(18, player.x, player.y, 1, 1, false, true)
+                spr(1, player.x - 8, player.y + 8, 1, 1, false, true)
+                spr(2, player.x, player.y + 8, 1, 1, false, true)
+            else
+                spr(1, player.x - 8, player.y)
+                spr(2, player.x, player.y)
+                spr(17, player.x - 8, player.y + 8)
+                spr(18, player.x, player.y + 8)
+            end
 
             if DEBUG_ORIGINS then
                 line(player.x - 1, player.y, player.x + 1, player.y, color_10)
                 line(player.x, player.y - 1, player.x, player.y + 1, color_10)
             end
 
-            -- DRAW ALL TRACK SEGMENTS
+            -- draw track segments
             draw_offset = -current_track_segment_offset 
             for track_segment in all(track_segments) do
                 if track_segment.type == t_track then
@@ -362,16 +457,35 @@ function _draw()
                 draw_offset += track_segment.length
             end
 
-            -- DRAW ALL KREMLINGS
+            -- draw kremlings
             for kremling in all(kremlings) do
-                spr(4, kremling.x - 8, kremling.y)
-                spr(5, kremling.x, kremling.y)
-                spr(20, kremling.x - 8, kremling.y + 8)
-                spr(21, kremling.x, kremling.y + 8)
+                if kremling.is_dying then
+                    -- draw upside down
+                    spr(20, kremling.x - 8, kremling.y, 1, 1, false, true)
+                    spr(21, kremling.x, kremling.y, 1, 1, false, true)
+                    spr(4, kremling.x - 8, kremling.y + 8, 1, 1, false, true)
+                    spr(5, kremling.x, kremling.y + 8, 1, 1, false, true)
+                else
+                    spr(4, kremling.x - 8, kremling.y)
+                    spr(5, kremling.x, kremling.y)
+                    spr(20, kremling.x - 8, kremling.y + 8)
+                    spr(21, kremling.x, kremling.y + 8)
+                end
 
                 if DEBUG_ORIGINS then
                     line(kremling.x - 1, kremling.y, kremling.x + 1, kremling.y, color_10)
                     line(kremling.x, kremling.y - 1, kremling.x, kremling.y + 1, color_10)
+                end
+            end
+
+            -- draw obstacles
+            for obstacle in all(obstacles) do
+                spr(23, obstacle.x - 8, obstacle.y)
+                spr(24, obstacle.x, obstacle.y)
+
+                if DEBUG_ORIGINS then
+                    line(obstacle.x - 1, obstacle.y, obstacle.x + 1, obstacle.y, color_10)
+                    line(obstacle.x, obstacle.y - 1, obstacle.x, obstacle.y + 1, color_10)
                 end
             end
         else
@@ -393,28 +507,28 @@ function _update()
             main_menu = false
         end
     else
-        -- ONLY IF PLAYER IS ALIVE
+        -- only update if player is still on-screen
         if player.y < 128 then
-            current_track_segment_offset += player.x_speed
-            current_score += 2
-
             if DEBUG_SPAWNING then
                 spawned_kremling = false
+                spawned_obstacle = false
                 spawned_track = false
             end
 
-            check_for_kremling_collisions()
+            -- INPUT
 
-            -- HANDLE BUTTON PRESS
-            if btnp(4) then
-                if not player.is_dying and player.jump_count < max_jump_count then
+            -- handle button press
+            if not player.is_dying and player.jump_count < max_jump_count then
+                if btnp(4) then
                     player_start_jump()
                 end
             end
 
-            -- GENERATE TRACK
+            -- SPAWNING
+
+            -- spawn track (first because lots of other stuff depends on track_segments)
             while #track_segments < max_track_segments do
-                -- GENERATE A FEW TRACK TYPES FIRST
+                -- generate a few (non-hole) track segments first
                 if #track_segments == 0 then
                     spawn_track_segment(track_y_start)
                     spawn_track_segment(track_segments[#track_segments].y2)
@@ -425,31 +539,42 @@ function _update()
                         spawn_hole_segment(track_segments[#track_segments].y2)
                     else
                         spawn_track_segment(track_segments[#track_segments].y2)
+
+                        -- spawn obstacle only on relatively flat surfaces
+                        last_track_segment = track_segments[#track_segments]
+                        if abs(last_track_segment.slope) < 0.3 then
+                            if flr(rnd(10)) > 5 and #obstacles < 1 then
+                                spawn_obstacle()
+                            end
+                        end
                     end
                 end
             end
 
-            -- REMOVE OFF-SCREEN TRACK SEGMENTS
-            if current_track_segment_offset >= track_segments[1].length then
-                del(track_segments, track_segments[1])
-                current_track_segment_offset = 0
+            -- spawn kremling
+            if flr(rnd(10000)) > 9900 and #kremlings < 1 then
+                spawn_kremling()
             end
 
-            -- MOVE PLAYER
+            -- MOVEMENT
+
+            -- move player / track
+            current_track_segment_offset += player.x_speed
+
             left_track_info = get_track_info(player.x - player_w / 4) -- check under the left wheel
             right_track_info = get_track_info(player.x + player_w / 4) -- check under the right wheel
             if player.is_jumping or player.is_dying then
-                -- HANDLE GRAVITY
+                -- handle gravity
                 player.y += player.y_speed
                 player.y_speed += 1
             
-                -- DISABLE GRAVITY IF PLAYER LANDED
+                -- disable gravity if player landed
                 if player.is_jumping then
                     track_y = calculate_track_y(player.x)
                     if player.y >= track_y - player_h then
                         player_stop_jump()
 
-                         -- PLAYER IS BELOW THE TRACK AND STILL FALLING
+                         -- player is below the track and still falling
                         if track_segments[left_track_info.segment_index].type == t_hole and track_segments[right_track_info.segment_index].type == t_hole then
                             if player.y_speed > 0 then 
                                 player_fall_death()
@@ -458,7 +583,7 @@ function _update()
                     end
                 end
             else
-                -- BOTH WHEELS ARE OVER A HOLE
+                -- both wheels are over a hole
                 if track_segments[left_track_info.segment_index].type == t_hole and track_segments[right_track_info.segment_index].type == t_hole then
                     player_fall_death()
                 else
@@ -466,13 +591,13 @@ function _update()
                 end
             end
 
-            -- MOVE KREMLINGS
+            -- move kremlings
             for kremling in all(kremlings) do
-                -- MUST ACCOUNT FOR THE PLAYER SPEED
+                -- accounts for the player speed
                 kremling.x -= (kremling.x_speed + player.x_speed)
 
                 if kremling.is_dying then
-                    -- HANDLE GRAVITY
+                    -- handle gravity
                     kremling.y += kremling.y_speed
                     kremling.y_speed += 1
                 else
@@ -480,26 +605,58 @@ function _update()
                 end
             end
 
-            -- REMOVE OFF-SCREEN KREMLINGS
+            -- move obstacles
+            for obstacle in all(obstacles) do
+                -- obstacle does not move relative to the track
+                obstacle.x -= player.x_speed
+
+                if obstacle.is_dying then
+                    -- handle gravity
+                    obstacle.y += obstacle.y_speed
+                    obstacle.y_speed += 1
+                end
+            end
+
+            -- DELETING OBJECTS
+
+            -- remove off-screen track segments
+            if current_track_segment_offset >= track_segments[1].length then
+                current_track_segment_offset -= track_segments[1].length
+                del(track_segments, track_segments[1])
+            end
+
+            -- remove off-screen kremlings
             for kremling in all(kremlings) do
                 if kremling.x < 0 then
                     del(kremlings, kremling)
                 end
             end
 
-            -- SPAWN KREMLING
-            if flr(rnd(10000)) > 9900 and #kremlings < 1 then
-                spawn_kremling()
+            -- remove off-screen obstacles
+            for obstacle in all(obstacles) do
+                if obstacle.x < 0 then
+                    del(obstacles, obstacle)
+                end
             end
 
-            -- GROW SPEED OVER TIME
-            if current_score > ((player.x_speed - player_x_speed_start + 1) * 2000) then
-                player.x_speed += 1
-            end
+            -- COLLISION DETECTION
 
-            -- MOVE PLAYER RIGHT OVER TIME
-            if current_score > ((player.x - player_x_start + 1) * 500) then
-                player.x += 1
+            check_for_kremling_collisions()
+            check_for_obstacle_collisions()
+
+            if not player.is_dying then
+                -- update score
+                current_score += 2
+
+                -- increase speed over time
+                if current_score > ((player.x_speed - player_x_speed_start + 1) * 2000) then
+                    player.x_speed += 1
+                end
+
+                -- move player forward (reduce lookahead) over time
+                if current_score > ((player.x - player_x_start + 1) * 500) then
+                    player.x += 1
+                end
             end
         else
             if btnp(4) then
