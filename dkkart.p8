@@ -17,9 +17,14 @@ function reset_game()
     player_h = sprite_h * 2
     kremling_w = sprite_w * 2
     kremling_h = sprite_h * 2
+
+    player_x_start = 20
+    player_x_speed_start = 2
     track_y_start = 68
     track_y_min = 60
+    track_y_max = 128
     track_y_margin = 60
+    hole_delta_y_max = 20
     track_segment_max_length = 40
     max_track_segments = 10
     max_jump_count = 2
@@ -31,9 +36,9 @@ function reset_game()
 
     -- STATE
     player = {
-        x = 20,
+        x = player_x_start,
         y = track_y_start - player_h,
-        x_speed = 2,
+        x_speed = player_x_speed_start,
         y_speed = 0,
         is_jumping = false,
         jump_count = 0,
@@ -176,12 +181,13 @@ end
 function spawn_hole_segment(start_y)
     segment_length = flr(rnd(10)) + player_w
 
-    -- TODO: allow spawning a y2 that is lower, but not higher
+    delta_y = flr(rnd(hole_delta_y_max)) - hole_delta_y_max / 2
+
     track_segment = {
         x1 = 0,
         y1 = start_y,
         x2 = segment_length,
-        y2 = start_y,
+        y2 = min(max(start_y + delta_y, track_y_min), track_y_max),
         length = segment_length, -- same as x2, but reads better
         type = t_hole
     }
@@ -372,12 +378,10 @@ function _draw()
             print("game over", 47, 50, 7)
         end
 
-        print("distance "..current_score, 10, 10, 7)
+        print("score "..current_score, 10, 10, 7)
 
         high_score_display = "best "..high_score
         print(high_score_display, 118 - #high_score_display * 4, 10, 7)
-
-        print(""..player.jump_count, 64, 10, 7)
     end
 end
 
@@ -392,7 +396,7 @@ function _update()
         -- ONLY IF PLAYER IS ALIVE
         if player.y < 128 then
             current_track_segment_offset += player.x_speed
-            current_score += player.x_speed
+            current_score += 2
 
             if DEBUG_SPAWNING then
                 spawned_kremling = false
@@ -416,7 +420,7 @@ function _update()
                     spawn_track_segment(track_segments[#track_segments].y2)
                     spawn_track_segment(track_segments[#track_segments].y2)
                 else
-                    should_spawn_hole = flr(rnd(10)) >= 8 
+                    should_spawn_hole = flr(rnd(10)) >= 7 
                     if should_spawn_hole and track_segments[#track_segments].type == t_track then
                         spawn_hole_segment(track_segments[#track_segments].y2)
                     else
@@ -488,6 +492,15 @@ function _update()
                 spawn_kremling()
             end
 
+            -- GROW SPEED OVER TIME
+            if current_score > ((player.x_speed - player_x_speed_start + 1) * 2000) then
+                player.x_speed += 1
+            end
+
+            -- MOVE PLAYER RIGHT OVER TIME
+            if current_score > ((player.x - player_x_start + 1) * 500) then
+                player.x += 1
+            end
         else
             if btnp(4) then
                 main_menu = true
